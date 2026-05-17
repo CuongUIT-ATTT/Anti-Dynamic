@@ -7,7 +7,7 @@ Tài liệu này mô tả quy trình kiểm thử hai phiên bản chương trì
 Hai phiên bản cần kiểm thử:
 
 - `Anti_Dynamic-Basic.exe`: phiên bản Basic, triển khai các kỹ thuật Anti-Debug, Anti-VM và Anti-Sandbox.
-- `Anti_Dynamic.exe`: phiên bản Advanced, kế thừa logic của bản Basic và bổ sung kỹ thuật **API Hashing** bằng thuật toán **DJB2** để ẩn hàm `IsDebuggerPresent`.
+- `Anti_Dynamic.exe`: phiên bản Advanced, kế thừa logic của bản Basic và bổ sung kỹ thuật **Environmental Keying** để xác thực môi trường chạy dựa trên Computer Name, Username và Volume Serial.
 
 Thông tin nhóm thực hiện:
 
@@ -24,44 +24,46 @@ Mục tiêu của tài liệu là chuẩn hóa các bước kiểm thử, kết 
 
 > Phần này **chỉ áp dụng cho phiên bản Advanced**: `Anti_Dynamic.exe`.
 
-Mục tiêu của phần kiểm thử tĩnh là chứng minh hàm `IsDebuggerPresent` đã được ẩn khỏi bảng Import Address Table (IAT) và không còn xuất hiện dưới dạng chuỗi ký tự trần trong file thực thi. Điều này xác nhận kỹ thuật API Hashing bằng DJB2 đã che giấu dấu vết API chống gỡ lỗi khỏi các phương pháp phân tích tĩnh cơ bản.
+Mục tiêu của phần kiểm thử tĩnh là chứng minh hàm `CheckEnvironmentalKey()` đã được triển khai để xác thực các tham số môi trường như Computer Name, Username và Volume Serial. Điều này xác nhận rằng kỹ thuật Environmental Keying đã được áp dụng để kiểm soát thực thi payload dựa trên các đặc tính hệ thống.
 
-### TC-01: Kiểm tra bảng Import Address Table (IAT) bằng CFF Explorer
+### TC-01: Kiểm tra hàm CheckEnvironmentalKey() bằng Disassembler (IDA Pro / Ghidra)
 
 #### Mục tiêu
 
-Xác minh rằng `IsDebuggerPresent` không xuất hiện trực tiếp trong bảng Import của file PE.
+Xác minh rằng chương trình triển khai hàm kiểm tra môi trường để lấy thông tin Computer Name, Username và Volume Serial.
 
 #### Công cụ sử dụng
 
-- CFF Explorer
+- IDA Pro, Ghidra hoặc x64dbg
 - File kiểm thử: `Anti_Dynamic.exe`
 
 #### Steps
 
-1. Khởi động CFF Explorer.
+1. Mở IDA Pro hoặc Ghidra.
 2. Nạp file `Anti_Dynamic.exe` vào công cụ.
-3. Ở cây thư mục bên trái, chọn **Import Directory**.
-4. Mở danh sách hàm import của thư viện `kernel32.dll`.
-5. Quan sát toàn bộ danh sách hàm được import.
+3. Tìm hàm `CheckEnvironmentalKey()` hoặc các hàm liên quan.
+4. Quan sát các lời gọi API:
+   - `GetComputerNameA()`
+   - `GetUserNameA()`
+   - `GetVolumeInformationA()`
 
 #### Expected Results
 
-Danh sách Import của `kernel32.dll` không có sự xuất hiện của hàm `IsDebuggerPresent`.
+Danh sách API calls chứa những hàm lấy thông tin môi trường (Computer Name, Username, Volume Serial).
 
 #### Cơ chế hoạt động
 
-Ở phiên bản Advanced, chương trình không gọi trực tiếp `IsDebuggerPresent` thông qua IAT. Thay vào đó, tên hàm được xử lý bằng cơ chế API Hashing với thuật toán DJB2. Tại thời điểm chạy, chương trình duyệt bảng export của thư viện cần thiết, tính hash từng tên hàm và so khớp với mã băm đã định nghĩa để lấy địa chỉ hàm thật.
+Ở phiên bản Advanced, chương trình triển khai hàm `CheckEnvironmentalKey()` để trích xuất các tham số môi trường từ hệ thống Windows. Những thông tin này được so sánh với các điều kiện được lập trình sẵn (ví dụ: tên máy chứa "DESKTOP" hoặc "LAPTOP", username chứa "Phạm" hoặc "Admin"). Nếu các điều kiện khớp, payload được phép thực thi.
 
 #### Minh chứng báo cáo
 
-Chụp ảnh màn hình danh sách Import trong CFF Explorer, trong đó không có hàm `IsDebuggerPresent`.
+Chụp ảnh màn hình Disassembler cho thấy các lời gọi API `GetComputerNameA`, `GetUserNameA`, `GetVolumeInformationA` trong hàm kiểm tra môi trường.
 
-### TC-02: Quét chuỗi ký tự (Strings Scan) bằng x64dbg
+### TC-02: Quét chuỗi tham số Environmental Keying bằng x64dbg
 
 #### Mục tiêu
 
-Xác minh rằng chuỗi `IsDebuggerPresent` không xuất hiện dưới dạng chuỗi ký tự trần trong file thực thi.
+Xác minh rằng chuỗi kiểm tra môi trường như "DESKTOP", "LAPTOP", "Phạm", "Admin" xuất hiện trong file thực thi để phục vụ logic Environmental Keying.
 
 #### Công cụ sử dụng
 
@@ -74,19 +76,20 @@ Xác minh rằng chuỗi `IsDebuggerPresent` không xuất hiện dưới dạng
 2. Nạp file `Anti_Dynamic.exe` vào x64dbg.
 3. Tại cửa sổ CPU, click chuột phải.
 4. Chọn **Search for** > **All modules** > **String references**.
-5. Nhập từ khóa `IsDebuggerPresent` vào ô tìm kiếm.
+5. Nhập từ khóa `DESKTOP` hoặc `LAPTOP` vào ô tìm kiếm.
+6. Xác nhận có kết quả tìm thấy trong bảng dữ liệu của chương trình.
 
 #### Expected Results
 
-x64dbg trả về `0 results`, không tìm thấy chuỗi `IsDebuggerPresent`.
+x64dbg tìm thấy chuỗi `DESKTOP`, `LAPTOP`, `Phạm`, `Admin` hoặc các tham số khác được sử dụng trong hàm kiểm tra môi trường.
 
 #### Cơ chế hoạt động
 
-Do phiên bản Advanced sử dụng mã băm thay cho tên API gốc, chuỗi `IsDebuggerPresent` không cần được lưu trực tiếp trong vùng dữ liệu của chương trình. Vì vậy, thao tác quét chuỗi không thể phát hiện tên API này bằng phương pháp thông thường.
+Phiên bản Advanced sử dụng Environmental Keying để xác định các mục tiêu payload dựa trên các tham số hệ thống như Computer Name và Username. Những chuỗi so sánh này được lưu trữ trong bảng dữ liệu của file PE và được quét lúc thực thi. Nếu các điều kiện environmental khớp, payload được kích hoạt. Kỹ thuật này giúp payload chỉ chạy trên các máy có cấu hình hoặc môi trường cụ thể.
 
 #### Minh chứng báo cáo
 
-Chụp ảnh màn hình kết quả tìm kiếm rỗng trong x64dbg.
+Chụp ảnh màn hình x64dbg cho thấy kết quả tìm kiếm chuỗi environmental keying như "DESKTOP", "LAPTOP", "Phạm", "Admin" trong bảng dữ liệu chương trình.
 
 ## Phần 2 - Kiểm thử phân tích động và hành vi (Dynamic Verification)
 
@@ -132,7 +135,7 @@ Popup hiển thị thông tin nhóm xuất hiện, bao gồm:
 
 Khi chương trình không bị debugger theo dõi, các hàm kiểm tra Anti-Debug không phát hiện dấu hiệu bất thường. Máy thật thường có số lượng CPU đủ lớn và không tồn tại các khóa Registry đặc trưng của VMware hoặc VirtualBox, do đó vượt qua kiểm tra Anti-VM. Hành động lắc chuột làm tọa độ chuột trước và sau khoảng chờ thay đổi, giúp chương trình xác nhận có tương tác người dùng thật và không xem môi trường hiện tại là Sandbox tự động.
 
-Ở phiên bản Advanced, trước khi gọi API chống gỡ lỗi, chương trình phân giải địa chỉ hàm thông qua mã băm DJB2 thay vì import trực tiếp. Nếu phân giải thành công và không phát hiện debugger, luồng thực thi tiếp tục giống bản Basic.
+Ở phiên bản Advanced, trước khi thực thi payload, chương trình kiểm tra Environmental Key bằng cách so sánh Computer Name, Username và Volume Serial với các điều kiện được thiết lập. Chỉ khi các điều kiện khớp, hàm `ExecutePayload()` mới được gọi. Nếu Environmental Key không khớp, chương trình thoát im lặng.
 
 #### Minh chứng báo cáo
 
@@ -198,7 +201,7 @@ Chương trình tự kết thúc im lặng, không hiển thị popup payload.
 
 Ở bản Basic, chương trình kiểm tra debugger thông qua API và kiểm tra thủ công flag `BeingDebugged` trong cấu trúc PEB. Khi tiến trình bị debugger gắn vào, flag này có giá trị `1` hoặc API chống gỡ lỗi trả về trạng thái phát hiện debugger, khiến chương trình thoát ngay.
 
-Ở bản Advanced, logic phát hiện debugger vẫn được giữ nguyên về mặt hành vi, nhưng lời gọi `IsDebuggerPresent` được ẩn bằng API Hashing. Chương trình phân giải API từ mã băm tại runtime, sau đó gọi hàm tương ứng để xác định trạng thái debugger. Nếu phát hiện debugger, chương trình thoát im lặng.
+Ở bản Advanced, trước khi kiểm tra Anti-Debug, chương trình trước tiên kiểm tra Environmental Key. Nếu Environmental Key không khớp, chương trình không cần thực hiện các kiểm tra Anti-Debug khác mà sẽ thoát ngay. Nếu Environmental Key khớp, chương trình tiếp tục kiểm tra debugger và các môi trường phân tích khác giống bản Basic.
 
 #### Minh chứng báo cáo
 
@@ -258,8 +261,8 @@ Việc khôi phục là bắt buộc để đảm bảo logic chương trình tr
 
 | STT | Hạng mục kiểm thử | Phiên bản áp dụng | Công cụ / Cách chạy | Kết quả kỳ vọng | Trạng thái |
 | --- | --- | --- | --- | --- | --- |
-| 1 | TC-01: Kiểm tra IAT | Advanced (`Anti_Dynamic.exe`) | CFF Explorer | Không thấy `IsDebuggerPresent` trong Import Directory | [ ] |
-| 2 | TC-02: Quét chuỗi `IsDebuggerPresent` | Advanced (`Anti_Dynamic.exe`) | x64dbg | Trả về `0 results` | [ ] |
+| 1 | TC-01: Kiểm tra Environmental Keying | Advanced (`Anti_Dynamic.exe`) | IDA Pro / Ghidra / x64dbg | Tìm thấy hàm kiểm tra môi trường và các API lấy thông tin hệ thống | [ ] |
+| 2 | TC-02: Quét chuỗi Environmental Keying | Advanced (`Anti_Dynamic.exe`) | x64dbg | Tìm thấy chuỗi `DESKTOP`, `LAPTOP`, `Phạm`, `Admin` trong dữ liệu | [ ] |
 | 3 | Kịch bản 1: Môi trường sạch | Basic và Advanced | Click đúp hoặc `Ctrl + F5`, lắc chuột 3 giây | Popup nhóm `G13` hiển thị | [ ] |
 | 4 | Kịch bản 2: Phát hiện Sandbox | Basic và Advanced | Click đúp hoặc `Ctrl + F5`, giữ chuột đứng im | Chương trình thoát im lặng, không popup | [ ] |
 | 5 | Kịch bản 3: Phát hiện Debugger | Basic và Advanced | `F5` trong Visual Studio hoặc x64dbg | Chương trình thoát im lặng, không popup | [ ] |
